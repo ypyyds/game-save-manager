@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>游戏存档管理器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* 自定义滚动条：占满右侧、粗滑块 */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track { background: rgba(20, 30, 45, 0.55); border-left: 1px solid rgba(255,255,255,0.06); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(102, 192, 244, 0.65), rgba(66, 150, 210, 0.65));
+  border-radius: 7px;
+  border: 2px solid rgba(15, 25, 35, 0.7);
+  min-height: 40px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(102, 192, 244, 0.9); }
+* { scrollbar-width: thin; scrollbar-color: rgba(102,192,244,0.65) rgba(20,30,45,0.55); }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body {
+  font-family: "Microsoft YaHei", sans-serif;
+  background: #0f1923;
+  color: #c7d5e0;
+  display: flex;
+}
+#bgVideo, #bgImg {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: -2;
+}
+#bgOverlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 25, 35, 0.75);
+  z-index: -1; pointer-events: none;
+}
+
+/* 侧边栏 */
+.sidebar {
+  width: 180px;
+  background: rgba(20, 30, 45, 0.8);
+  border-right: 1px solid rgba(255,255,255,0.05);
+  display: flex;
+  flex-direction: column;
+  padding: 15px 0;
+  flex-shrink: 0;
+}
+.sidebar-logo {
+  padding: 10px 20px 20px;
+  font-size: 18px;
+  font-weight: bold;
+  color: #66c0f4;
+}
+.sidebar-item {
+  padding: 12px 20px;
+  cursor: pointer;
+  color: #8f98a0;
+  font-size: 14px;
+  transition: all 0.2s;
+  border-left: 3px solid transparent;
+}
+.sidebar-item:hover { color: #fff; background: rgba(255,255,255,0.05); }
+.sidebar-item.active {
+  color: #fff;
+  background: rgba(102, 192, 244, 0.1);
+  border-left-color: #66c0f4;
+}
+
+/* 主内容 */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.main-header {
+  padding: 20px 25px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.main-header h2 { font-size: 22px; color: #fff; }
+.refresh-btn {
+  background: #66c0f4; color: #1b2838; border: none;
+  padding: 8px 18px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: bold;
+}
+.refresh-btn:hover { background: #fff; }
+.messages { padding: 0 25px; font-size: 12px; color: #8f98a0; margin-bottom: 10px; }
+
+/* 游戏卡片 */
+.game-grid {
+  flex: 1;
+  overflow-y: scroll;
+  padding: 10px 25px 25px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-content: flex-start;
+}
+.game-card {
+  width: 340px;
+  background: rgba(26, 37, 53, 0.75);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+  animation: cardIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes cardIn {
+  0% { transform: translateY(30px) scale(0.9); opacity: 0; }
+  60% { transform: translateY(-5px) scale(1.02); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.game-card.removing {
+  transform: scale(0.3) rotate(10deg);
+  opacity: 0;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+}
+@keyframes springPop {
+  0%   { transform: translateY(18px) scale(0.92); opacity: 0.4; }
+  60%  { transform: translateY(-6px) scale(1.02); }
+  80%  { transform: translateY(2px) scale(0.99); }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.game-card.spring-pop {
+  animation: springPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.game-cover {
+  width: 100%;
+  height: 180px;
+  background: #2a475e;
+  object-fit: cover;
+  display: block;
+}
+.game-cover-placeholder {
+  width: 100%; height: 180px;
+  background: linear-gradient(135deg, #2a475e, #1b2838);
+  display: flex; align-items: center; justify-content: center;
+  color: #66c0f4; font-size: 40px;
+}
+.game-info { padding: 10px 12px 6px; }
+.game-name { font-size: 14px; color: #fff; font-weight: bold; margin-bottom: 3px; }
+.game-meta { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+.game-buttons { display: flex; gap: 6px; padding: 0 12px 12px; }
+.game-buttons button {
+  flex: 1;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+.btn-open { background: #2a475e; color: #c7d5e0; }
+.btn-open:hover { background: #3a6078; }
+.btn-backup { background: #66c0f4; color: #1b2838; }
+.btn-backup:hover { background: #fff; }
+.btn-delete { background: #c0392b; color: #fff; }
+.btn-delete:hover { background: #e74c3c; }
+.btn-store { background: #1b9a5a; color: #fff; }
+.btn-store:hover { background: #27ae60; }
+
+.empty {
+  width: 100%;
+  text-align: center;
+  padding: 60px;
+  color: #8f98a0;
+  font-size: 15px;
+}
+
+/* 设置面板 */
+.settings-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 25px;
+  display: none;
+}
+.settings-view.show { display: block; }
+.settings-section {
+  background: rgba(20, 30, 45, 0.8);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.settings-section h3 { color: #fff; font-size: 15px; margin-bottom: 10px; }
+.settings-section p { color: #8f98a0; font-size: 12px; margin-bottom: 10px; }
+.wallpaper-grid {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+}
+.wallpaper-item {
+  width: 120px; height: 70px; border-radius: 6px;
+  overflow: hidden; cursor: pointer; position: relative;
+}
+.wallpaper-item img, .wallpaper-item video {
+  width: 100%; height: 100%; object-fit: cover;
+}
+.wallpaper-item.active { outline: 2px solid #66c0f4; }
+.opacity-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.opacity-row input { flex: 1; }
+
+/* 回收站 */
+.recycle-view, .mods-view {
+  flex: 1; overflow-y: scroll; display: none; flex-direction: column;
+}
+.recycle-view.show, .mods-view.show { display: flex; }
+.recycle-list { padding: 10px 25px 25px; }
+.recycle-item {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(26, 37, 53, 0.75);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.recycle-item .ri-name { flex: 1; color: #fff; font-size: 14px; font-weight: bold; }
+.recycle-item .ri-meta { color: #8f98a0; font-size: 12px; }
+.recycle-item button {
+  padding: 6px 14px; border: none; border-radius: 5px;
+  cursor: pointer; font-size: 12px; font-weight: bold;
+}
+.btn-restore { background: #66c0f4; color: #1b2838; }
+.btn-restore:hover { background: #fff; }
+.btn-purge { background: #c0392b; color: #fff; }
+.btn-purge:hover { background: #e74c3c; }
+
+/* Mod网站 */
+.mods-grid { padding: 10px 25px 25px; display: flex; flex-wrap: wrap; gap: 14px; }
+.mod-card {
+  width: 220px; background: rgba(26, 37, 53, 0.75);
+  backdrop-filter: blur(10px);
+  border-radius: 10px; padding: 16px;
+  cursor: pointer; transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1);
+}
+.mod-card:hover { transform: translateY(-4px) scale(1.02); }
+.mod-card .mc-name { color: #fff; font-size: 15px; font-weight: bold; margin-bottom: 4px; }
+.mod-card .mc-desc { color: #8f98a0; font-size: 12px; }
+.mod-card.dragging { opacity: 0.35; transform: scale(0.95); }
+.mod-card.drag-over { box-shadow: 0 -3px 0 0 #66c0f4; }
+.mod-card.drag-over-bottom { box-shadow: 0 3px 0 0 #66c0f4; }
+</style>
+</head>
+<body>
+
+<img id="bgImg">
+<video id="bgVideo" autoplay loop muted></video>
+<div id="bgOverlay"></div>
+
+<div class="sidebar">
+  <div class="sidebar-logo">🎮 存档管理器</div>
+  <div class="sidebar-item active" id="nav-main" onclick="showView('main')">🏠 主页</div>
+  <div class="sidebar-item" id="nav-recycle" onclick="showView('recycle')">🗑 回收站</div>
+  <div class="sidebar-item" id="nav-mods" onclick="showView('mods')">🎨 Mod网站</div>
+  <div class="sidebar-item" id="nav-settings" onclick="showView('settings')">⚙️ 设置</div>
+</div>
+
+<div class="main">
+  <div class="main-header">
+    <h2>游戏存档</h2>
+    <button class="refresh-btn" onclick="scan()">🔍 扫描存档</button>
+    <input type="text" id="searchBox" placeholder="搜索游戏名称..." oninput="filterGames()" style="flex:1;max-width:300px;padding:8px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(20,30,45,0.8);color:#fff;font-size:13px;outline:none;">
+  </div>
+  <div class="messages" id="messages"></div>
+  <div class="game-grid" id="gameList"></div>
+
+  <div class="recycle-view" id="recycleView">
+    <div class="main-header"><h2>🗑 回收站</h2><button class="refresh-btn" onclick="loadRecycle()">🔄 刷新</button><button class="refresh-btn" onclick="selectAllRecycle()">☑️ 全选</button><button class="refresh-btn" onclick="batchRestore()" style="background:#27ae60;color:#fff">♻️ 批量恢复</button><button class="refresh-btn" onclick="batchPurge()" style="background:#c0392b;color:#fff">✖ 批量删除</button></div>
+    <div class="recycle-list" id="recycleList"></div>
+  </div>
+
+  <div class="mods-view" id="modsView">
+    <div class="main-header"><h2>🎨 Mod网站</h2></div>
+    <div class="mods-grid" id="modsList"></div>
+  </div>
+
+  <div class="settings-view" id="settingsView">
+    <div class="settings-section">
+      <h3>背景图片</h3>
+      <p>点击选择本地图片/视频作为背景，或直接拖拽图片到窗口</p>
+      <button class="refresh-btn" onclick="pickBg()">📁 选择背景</button>
+      <button class="refresh-btn" onclick="importWallpapers()">🖼 从Wallpaper Engine导入</button>
+      <div class="wallpaper-grid" id="wallpaperList"></div>
+      <div class="opacity-row">
+        <span>不透明度</span>
+        <input type="range" id="opacitySlider" min="0" max="100" value="75" oninput="changeOpacity(this.value)">
+        <span id="opacityVal">75%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+function showView(view) {
+  document.getElementById('nav-main').classList.toggle('active', view === 'main');
+  document.getElementById('nav-recycle').classList.toggle('active', view === 'recycle');
+  document.getElementById('nav-mods').classList.toggle('active', view === 'mods');
+  document.getElementById('nav-settings').classList.toggle('active', view === 'settings');
+  document.getElementById('gameList').style.display = view === 'main' ? 'flex' : 'none';
+  document.querySelector('.main-header').style.display = view === 'main' ? 'flex' : 'none';
+  document.getElementById('messages').style.display = view === 'main' ? 'block' : 'none';
+  document.getElementById('recycleView').classList.toggle('show', view === 'recycle');
+  document.getElementById('modsView').classList.toggle('show', view === 'mods');
+  document.getElementById('settingsView').classList.toggle('show', view === 'settings');
+  if (view === 'recycle') loadRecycle();
+  if (view === 'mods') renderMods();
+}
+
+function formatSize2(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(1) + ' GB';
+}
+
+async function loadRecycle() {
+  const r = await ipcRenderer.invoke('list-recyclebin');
+  const list = document.getElementById('recycleList');
+  const items = r.items || [];
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty">回收站是空的</div>';
+    return;
+  }
+  list.innerHTML = items.map((it, i) => {
+    const t = new Date(it.deletedAt);
+    const dateStr = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0') + ' ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
+    return '<div class="recycle-item">'
+      + '<input type="checkbox" class="ri-check" value="' + it.id + '" style="width:18px;height:18px;cursor:pointer;accent-color:#66c0f4;">'
+      + '<div style="flex:1;"><div class="ri-name">' + it.name + '</div>'
+      + '<div class="ri-meta">' + formatSize2(it.size) + ' · ' + dateStr + '</div></div>'
+      + '<button class="btn-restore" onclick="restoreSave(\'' + it.id + '\')">♻️ 恢复</button>'
+      + '<button class="btn-purge" onclick="purgeSave(\'' + it.id + '\')">✖ 彻底删除</button>'
+      + '</div>';
+  }).join('');
+}
+
+function selectAllRecycle() {
+  const checks = document.querySelectorAll('.ri-check');
+  const allChecked = Array.from(checks).every(c => c.checked);
+  checks.forEach(c => c.checked = !allChecked);
+}
+
+async function batchRestore() {
+  const checks = document.querySelectorAll('.ri-check:checked');
+  if (checks.length === 0) { alert('请先勾选要恢复的项目'); return; }
+  if (!confirm('恢复选中的 ' + checks.length + ' 个项目？')) return;
+  for (const c of checks) {
+    await ipcRenderer.invoke('restore-save', c.value);
+  }
+  loadRecycle();
+  scan();
+}
+
+async function batchPurge() {
+  const checks = document.querySelectorAll('.ri-check:checked');
+  if (checks.length === 0) { alert('请先勾选要删除的项目'); return; }
+  if (!confirm('彻底删除选中的 ' + checks.length + ' 个项目？此操作无法恢复！')) return;
+  for (const c of checks) {
+    await ipcRenderer.invoke('purge-save', c.value);
+  }
+  loadRecycle();
+}
+
+async function restoreSave(id) {
+  const r = await ipcRenderer.invoke('restore-save', id);
+  if (r.success) {
+    loadRecycle();
+    scan();
+    showView('main');
+  } else {
+    alert('恢复失败：' + r.error);
+  }
+}
+
+async function purgeSave(id) {
+  if (!confirm('彻底删除后无法恢复，确定吗？')) return;
+  const r = await ipcRenderer.invoke('purge-save', id);
+  if (r.success) loadRecycle();
+  else alert('删除失败：' + r.error);
+}
+
+const MOD_SITES = [
+  { name: '3DM MOD站', desc: '国内热门游戏Mod', url: 'https://mod.3dmgame.com/', tag: '国内' },
+  { name: 'Steam创意工坊', desc: 'Steam官方Mod平台', url: 'https://steamcommunity.com/workshop/', tag: '国内' },
+  { name: 'Nexus Mods', desc: '全球最大Mod社区', url: 'https://www.nexusmods.com/', tag: '需加速' },
+  { name: 'MODDB', desc: '经典游戏Mod库', url: 'https://www.moddb.com/', tag: '需加速' },
+  { name: 'CurseForge', desc: 'Minecraft等游戏Mod', url: 'https://www.curseforge.com/', tag: '需加速' }
+];
+
+function getModOrder() {
+  try { return JSON.parse(localStorage.getItem('modOrder') || '[]'); } catch(e) { return []; }
+}
+
+let _dragUrl = null;
+let _lastDragEnd = 0;
+
+function renderMods() {
+  const saved = getModOrder();
+  const sites = MOD_SITES.slice().sort((a, b) => {
+    const ia = saved.indexOf(a.url), ib = saved.indexOf(b.url);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+  const list = document.getElementById('modsList');
+  list.innerHTML = sites.map(s => {
+    const tagHtml = s.tag ? '<span style="font-size:10px;color:' + (s.tag === '国内' ? '#66bb6a' : '#f39c12') + ';border:1px solid currentColor;border-radius:3px;padding:1px 5px;margin-left:6px;">' + s.tag + '</span>' : '';
+    return '<div class="mod-card" draggable="true" data-url="' + s.url + '"'
+      + ' ondragstart="onDragStart(event)" ondragover="onDragOver(event)"'
+      + ' ondrop="onDrop(event)" ondragend="onDragEnd(event)"'
+      + ' onclick="openSite(\'' + s.url + '\')">'
+      + '<div class="mc-name">' + s.name + tagHtml + '</div>'
+      + '<div class="mc-desc">' + s.desc + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function onDragStart(e) {
+  _dragUrl = e.target.getAttribute('data-url');
+  e.target.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', _dragUrl); } catch(err) {}
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const card = e.target.closest('.mod-card');
+  if (!card || !_dragUrl) return;
+  document.querySelectorAll('.mod-card').forEach(c => c.classList.remove('drag-over', 'drag-over-bottom'));
+  const rect = card.getBoundingClientRect();
+  const before = (e.clientY - rect.top) < rect.height / 2;
+  card.classList.add(before ? 'drag-over' : 'drag-over-bottom');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  if (!_dragUrl) return;
+  const container = document.getElementById('modsList');
+  const cards = [...container.querySelectorAll('.mod-card')];
+  const from = cards.findIndex(c => c.getAttribute('data-url') === _dragUrl);
+  const target = e.target.closest('.mod-card');
+  if (from === -1 || !target) { onDragEnd(e); return; }
+  const to = cards.indexOf(target);
+  const rect = target.getBoundingClientRect();
+  const before = (e.clientY - rect.top) < rect.height / 2;
+  const insertAt = before ? to : to + 1;
+  if (insertAt > from) {
+    container.insertBefore(cards[from], cards[insertAt] || null);
+  } else if (insertAt < from) {
+    container.insertBefore(cards[from], cards[insertAt]);
+  }
+  const order = [...container.querySelectorAll('.mod-card')].map(c => c.getAttribute('data-url'));
+  localStorage.setItem('modOrder', JSON.stringify(order));
+  renderMods();
+}
+
+function onDragEnd(e) {
+  _lastDragEnd = Date.now();
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.mod-card').forEach(c => c.classList.remove('drag-over', 'drag-over-bottom'));
+  _dragUrl = null;
+}
+
+async function openSite(url) {
+  if (Date.now() - _lastDragEnd < 600) return;
+  await ipcRenderer.invoke('open-url', url);
+}
+
+async function loadSettings() {
+  const cfg = await ipcRenderer.invoke('get-bg');
+  if (cfg.opacity !== undefined) {
+    document.getElementById('opacitySlider').value = cfg.opacity;
+    document.getElementById('opacityVal').textContent = cfg.opacity + '%';
+    document.getElementById('bgOverlay').style.opacity = cfg.opacity / 100;
+  }
+  if (cfg.bgPath) applyBg(cfg.bgPath);
+}
+
+function changeOpacity(val) {
+  document.getElementById('opacityVal').textContent = val + '%';
+  document.getElementById('bgOverlay').style.opacity = val / 100;
+  ipcRenderer.invoke('save-bg', { opacity: val });
+}
+
+async function pickBg() {
+  const r = await ipcRenderer.invoke('pick-bg');
+  if (!r.canceled) {
+    applyBg(r.filePath);
+    ipcRenderer.invoke('save-bg', { bgPath: r.filePath });
+  }
+}
+
+async function importWallpapers() {
+  const r = await ipcRenderer.invoke('scan-wallpapers');
+  const wallpapers = r.wallpapers || [];
+  const el = document.getElementById('wallpaperList');
+  el.innerHTML = wallpapers.map((w, i) => {
+    const src = w.preview ? `file:///${w.preview.replace(/\\/g,'/')}` : '';
+    return `<div class="wallpaper-item" onclick="pickWallpaper(${i})" title="${w.title}">
+      ${w.type === 'video' ? `<video src="${src}" muted></video>` : `<img src="${src}">`}
+    </div>`;
+  }).join('');
+  window._wallpapers = wallpapers;
+}
+
+async function pickWallpaper(i) {
+  const w = window._wallpapers[i];
+  const path = w.type === 'video' ? w.file : w.preview;
+  applyBg(path);
+  ipcRenderer.invoke('save-bg', { bgPath: path });
+}
+
+function applyBg(path) {
+  const ext = path.split('.').pop().toLowerCase();
+  const img = document.getElementById('bgImg');
+  const vid = document.getElementById('bgVideo');
+  if (['mp4','webm','mkv','avi','mov'].includes(ext)) {
+    img.style.display = 'none';
+    vid.style.display = 'block';
+    vid.src = 'file:///' + path.replace(/\\/g,'/');
+  } else {
+    vid.style.display = 'none';
+    img.style.display = 'block';
+    img.src = 'file:///' + path.replace(/\\/g,'/');
+  }
+}
+
+document.body.addEventListener('dragover', e => e.preventDefault());
+document.body.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file && file.path) {
+    applyBg(file.path);
+    ipcRenderer.invoke('save-bg', { bgPath: file.path });
+  }
+});
+
+async function scan() {
+  document.getElementById('gameList').innerHTML = '<div class="empty">扫描中...</div>';
+  document.getElementById('messages').innerHTML = '';
+  const result = await ipcRenderer.invoke('scan-games');
+  document.getElementById('messages').innerHTML = result.messages.join('<br>');
+  window._games = result.games || [];
+  renderGames(window._games);
+}
+
+function filterGames() {
+  const q = document.getElementById('searchBox').value.toLowerCase().trim();
+  const filtered = q ? window._games.filter(g => g.name.toLowerCase().includes(q)) : window._games;
+  recordCardPositions();
+  renderGames(filtered);
+  requestAnimationFrame(() => requestAnimationFrame(playCardPositions));
+}
+
+function renderGames(games) {
+  const list = document.getElementById('gameList');
+  if (!games || games.length === 0) {
+    list.innerHTML = '<div class="empty">没有匹配的游戏</div>';
+    return;
+  }
+  list.innerHTML = games.map((g) => {
+    const i = window._games.indexOf(g);
+    const coverUrl = g.appId ? 'https://cdn.cloudflare.steamstatic.com/steam/apps/' + g.appId + '/header.jpg' : '';
+    let coverHtml;
+    if (coverUrl) {
+      coverHtml = '<div style="position:relative;width:100%;height:180px;background:#2a475e;">'
+        + '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:#66c0f4;">🎮</div>'
+        + '<img class="game-cover" src="' + coverUrl + '" style="position:absolute;inset:0;" onerror="this.remove()">'
+        + '<div onclick="renameGame(' + i + ')" style="position:absolute;top:6px;right:6px;width:26px;height:26px;background:rgba(0,0,0,0.6);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;font-weight:bold;z-index:2;">⋯</div>'
+        + '</div>';
+    } else {
+      coverHtml = '<div style="position:relative;width:100%;height:180px;background:#2a475e;">'
+        + '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:#66c0f4;">🎮</div>'
+        + '<div onclick="renameGame(' + i + ')" style="position:absolute;top:6px;right:6px;width:26px;height:26px;background:rgba(0,0,0,0.6);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;font-size:16px;font-weight:bold;z-index:2;">⋯</div>'
+        + '</div>';
+    }
+    const storeBtn = g.appId ? '<button class="btn-store" onclick="openStore(' + i + ')">🏪 商店</button>' : '';
+    return '<div class="game-card">'
+      + coverHtml
+      + '<div class="game-info">'
+      +   '<div class="game-name">' + g.name + '</div>'
+      +   '<div class="game-meta">' + (g.type === 'steam' ? 'Steam云存档' : '本地存档') + ' · ' + g.size + '</div>'
+      + '</div>'
+      + '<div class="game-buttons">'
+      +   '<button class="btn-open" onclick="openFolder(' + i + ')">📂 打开</button>'
+      +   '<button class="btn-backup" onclick="backup(' + i + ')">💾 备份</button>'
+      +   '<button class="btn-delete" onclick="deleteGame(' + i + ')">🗑 删除</button>'
+      +   storeBtn
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+async function openFolder(i) {
+  const r = await ipcRenderer.invoke('open-folder', window._games[i].savePath);
+  if (!r.success) alert('打开失败：' + r.error + '\n路径：' + window._games[i].savePath);
+}
+
+async function openStore(i) {
+  const g = window._games[i];
+  await ipcRenderer.invoke('open-url', 'https://store.steampowered.com/app/' + g.appId);
+}
+
+function renameGame(i) {
+  const g = window._games[i];
+  const card = document.querySelectorAll('.game-card')[i];
+  const nameEl = card.querySelector('.game-name');
+  const oldName = g.name;
+  nameEl.innerHTML = '<input type="text" id="renameInput" value="' + oldName.replace(/"/g,'&quot;') + '" style="width:100%;padding:4px;border-radius:4px;border:1px solid #66c0f4;background:#1a2535;color:#fff;font-size:14px;outline:none;">';
+  const input = document.getElementById('renameInput');
+  input.focus();
+  input.select();
+  function done() {
+    const v = input.value.trim();
+    if (v) g.name = v;
+    filterGames();
+  }
+  input.onblur = done;
+  input.onkeydown = function(e) {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { g.name = oldName; filterGames(); }
+  };
+}
+
+async function backup(i) {
+  const g = window._games[i];
+  const r = await ipcRenderer.invoke('backup-game', g);
+  if (r.canceled) return;
+  if (r.success) {
+    alert('备份成功！保存到：' + r.backupDir);
+  } else {
+    alert('备份失败：' + r.error);
+  }
+}
+
+async function deleteGame(i) {
+  const g = window._games[i];
+  recordCardPositions();
+  const card = document.querySelectorAll('.game-card')[i];
+  if (card) card.classList.add('removing');
+  await new Promise(r => setTimeout(r, 300));
+  const r = await ipcRenderer.invoke('delete-game', g);
+  if (r.canceled) {
+    if (card) card.classList.remove('removing');
+    return;
+  }
+  if (r.success) {
+    window._games.splice(i, 1);
+    renderGames(window._games);
+    requestAnimationFrame(() => requestAnimationFrame(playCardPositions));
+  } else {
+    if (card) card.classList.remove('removing');
+    alert('删除失败：' + r.error);
+  }
+}
+
+/* ===== FLIP 弹簧动画：窗口缩放/删除补位时卡片弹性滑动 ===== */
+function recordCardPositions() {
+  window._firstRects = [];
+  document.querySelectorAll('.game-card').forEach(el => {
+    window._firstRects.push({ el: el, rect: el.getBoundingClientRect() });
+  });
+}
+
+function playCardPositions() {
+  if (!window._firstRects) return;
+  window._firstRects.forEach(({ el, rect }) => {
+    if (!el.isConnected) return;
+    const last = el.getBoundingClientRect();
+    const dx = rect.left - last.left;
+    const dy = rect.top - last.top;
+    if (dx === 0 && dy === 0) return;
+    el.style.transition = 'none';
+    el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    void el.getBoundingClientRect();
+    el.style.transition = 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease';
+    el.style.transform = '';
+  });
+  window._firstRects = null;
+}
+
+let _resizeAnim = false;
+window.addEventListener('resize', () => {
+  if (_resizeAnim) return;
+  _resizeAnim = true;
+  const cards = document.querySelectorAll('.game-card');
+  cards.forEach((el, idx) => {
+    el.classList.remove('spring-pop');
+    void el.offsetWidth;
+    el.style.animationDelay = (idx % 10) * 35 + 'ms';
+    el.classList.add('spring-pop');
+  });
+  setTimeout(() => { _resizeAnim = false; }, 700);
+});
+
+loadSettings();
+setTimeout(scan, 500);
+</script>
+</body>
+</html>

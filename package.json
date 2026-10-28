@@ -1,0 +1,12 @@
+{
+  "name": "steam-save-manager",
+  "version": "1.0.0",
+  "description": "Steam游戏存档管理器",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.1.0"
+  }
+}
